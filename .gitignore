@@ -1,0 +1,4 @@
+# Real passwords and tokens of this machine.
+.env
+# AppRole credentials written by vault/bootstrap.sh at every Vault start.
+.secrets/

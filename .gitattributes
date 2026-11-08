@@ -1,0 +1,3 @@
+# Run inside Linux containers: a Windows checkout must keep LF line endings.
+*.sh text eol=lf
+*.js text eol=lf

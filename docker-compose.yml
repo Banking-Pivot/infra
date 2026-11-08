@@ -1,0 +1,96 @@
+# Local infrastructure of the banking microservices: one database per service and HashiCorp
+# Vault with their secrets. The services themselves run from the IDE.
+#
+#   copy .env.example .env          (first time only)
+#   docker compose up -d --wait
+#
+# Vault runs in dev mode: in memory and unsealed, for local development only. Every time it
+# starts, vault/bootstrap.sh loads the secrets again and writes .secrets/<service>.properties
+# with the AppRole each service logs in with.
+name: banking
+
+services:
+
+  vault:
+    image: hashicorp/vault:2.1.2
+    entrypoint: ["/bin/sh", "/vault/bootstrap/bootstrap.sh"]
+    cap_add: [IPC_LOCK]
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_ROOT_TOKEN:?copy .env.example to .env}
+      CUSTOMER_DB_USERNAME: customers
+      CUSTOMER_DB_PASSWORD: ${CUSTOMER_DB_PASSWORD:?copy .env.example to .env}
+      ACCOUNT_DB_USERNAME: accounts
+      ACCOUNT_DB_PASSWORD: ${ACCOUNT_DB_PASSWORD:?copy .env.example to .env}
+      CREDIT_DB_USERNAME: credits
+      CREDIT_DB_PASSWORD: ${CREDIT_DB_PASSWORD:?copy .env.example to .env}
+      CONFIG_GIT_USERNAME: ${CONFIG_GIT_USERNAME:-}
+      CONFIG_GIT_TOKEN: ${CONFIG_GIT_TOKEN:-}
+    ports: ["8200:8200"]
+    volumes:
+      - ./vault/bootstrap.sh:/vault/bootstrap/bootstrap.sh:ro
+      - ./.secrets:/vault/approle
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/bootstrap-done"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+  # customer-service. Root user for administration; the service logs in as "customers",
+  # created by mongo/create-customer-user.js the first time the volume is empty.
+  customer-mongo:
+    image: mongo:8.0
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?copy .env.example to .env}
+      CUSTOMER_DB_USERNAME: customers
+      CUSTOMER_DB_PASSWORD: ${CUSTOMER_DB_PASSWORD:?copy .env.example to .env}
+    ports: ["27018:27017"]
+    volumes:
+      - customer-mongo-data:/data/db
+      - ./mongo/create-customer-user.js:/docker-entrypoint-initdb.d/create-customer-user.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # account-service.
+  account-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: accounts_db
+      POSTGRES_USER: accounts
+      POSTGRES_PASSWORD: ${ACCOUNT_DB_PASSWORD:?copy .env.example to .env}
+    ports: ["5433:5432"]
+    volumes:
+      - account-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U accounts -d accounts_db"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+  # credit-service.
+  credit-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: credits_db
+      POSTGRES_USER: credits
+      POSTGRES_PASSWORD: ${CREDIT_DB_PASSWORD:?copy .env.example to .env}
+    ports: ["5434:5432"]
+    volumes:
+      - credit-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U credits -d credits_db"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  customer-mongo-data:
+  account-postgres-data:
+  credit-postgres-data:
