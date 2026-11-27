@@ -1,0 +1,64 @@
+# Cache of product-service. It holds copies of products that expire on their own, so it keeps
+# nothing on disk and drops the least recently used entries when memory runs out.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-redis
+  labels:
+    app: product-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: product-redis
+  template:
+    metadata:
+      labels:
+        app: product-redis
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: redis
+          image: redis:8.2-alpine
+          args:
+            - --requirepass
+            - $(REDIS_PASSWORD)
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            - --maxmemory
+            - 64mb
+            - --maxmemory-policy
+            - allkeys-lru
+          ports:
+            - containerPort: 6379
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: banking-env
+                  key: PRODUCT_REDIS_PASSWORD
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-redis
+  labels:
+    app: product-redis
+spec:
+  selector:
+    app: product-redis
+  ports:
+    - port: 6379
+      targetPort: 6379

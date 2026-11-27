@@ -116,6 +116,39 @@ CREDIT_CLOCK_OFFSET=40d docker compose --profile apps up -d credit-service
 
 Desde el IDE, agrega la variable de entorno `CREDIT_CLOCK_OFFSET=40d` a la configuración de `credit-service`. Para volver a la fecha real, arranca el servicio otra vez sin esa variable.
 
+## Kubernetes (opcional)
+
+Los mismos contenedores corren también en un clúster. Cada servicio trae sus manifiestos en `k8s/` y este repositorio los reúne con la infraestructura en `kustomization.yaml`, todo en el espacio de nombres `banking`.
+
+Hace falta un clúster de un nodo con unos 6 GB de memoria libres (Docker Desktop con Kubernetes activado, minikube, kind o k3s), `kubectl`, el archivo `.env` del paso 2 y las imágenes construidas como en la opción A:
+
+```bash
+docker compose --profile apps build
+```
+
+El clúster tiene que ver esas imágenes, que no están en ningún registro. Con el Kubernetes de Docker Desktop ya las ve. En kind se cargan con `kind load docker-image <servicio>:0.0.1-SNAPSHOT`, en minikube con `minikube image load` y en k3s con `docker save <imágenes> | ctr images import -`.
+
+Detén antes la infraestructura de compose (`docker compose --profile apps stop`) para no quedarte sin memoria. Luego:
+
+```bash
+kubectl apply -k .
+kubectl -n banking get pods --watch
+```
+
+Cuando los 22 pods están en `Running 1/1`, el gateway responde en el puerto 30080 del nodo (http://localhost:30080 en Docker Desktop). Para usar las colecciones de Postman sin cambiarles la dirección, publícalo en el 8080:
+
+```bash
+kubectl -n banking port-forward service/api-gateway 8080:8080
+```
+
+Vault corre aquí igual que en compose, en modo de desarrollo: si su pod se reinicia, reinicia también los servicios con `kubectl -n banking rollout restart deployment`.
+
+Para quitar todo, volúmenes incluidos:
+
+```bash
+kubectl delete -k .
+```
+
 ## Direcciones
 
 | Qué | Dirección |

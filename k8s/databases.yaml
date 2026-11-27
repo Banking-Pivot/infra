@@ -1,0 +1,652 @@
+# One database per service, each with its own volume, like infra/docker-compose.yml. The
+# passwords come from the Secret banking-env, generated from the .env file of this repository.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: account-postgres-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: account-postgres
+  labels:
+    app: account-postgres
+spec:
+  replicas: 1
+  # One database, one volume: the old pod leaves before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: account-postgres
+  template:
+    metadata:
+      labels:
+        app: account-postgres
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: accounts_db
+            - name: POSTGRES_USER
+              value: accounts
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: banking-env
+                  key: ACCOUNT_DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "accounts", "-d", "accounts_db"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: account-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: account-postgres
+  labels:
+    app: account-postgres
+spec:
+  selector:
+    app: account-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: credit-postgres-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: credit-postgres
+  labels:
+    app: credit-postgres
+spec:
+  replicas: 1
+  # One database, one volume: the old pod leaves before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: credit-postgres
+  template:
+    metadata:
+      labels:
+        app: credit-postgres
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: credits_db
+            - name: POSTGRES_USER
+              value: credits
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: banking-env
+                  key: CREDIT_DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "credits", "-d", "credits_db"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: credit-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: credit-postgres
+  labels:
+    app: credit-postgres
+spec:
+  selector:
+    app: credit-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: transaction-postgres-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transaction-postgres
+  labels:
+    app: transaction-postgres
+spec:
+  replicas: 1
+  # One database, one volume: the old pod leaves before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: transaction-postgres
+  template:
+    metadata:
+      labels:
+        app: transaction-postgres
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: transactions_db
+            - name: POSTGRES_USER
+              value: transactions
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: banking-env
+                  key: TRANSACTION_DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "transactions", "-d", "transactions_db"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: transaction-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction-postgres
+  labels:
+    app: transaction-postgres
+spec:
+  selector:
+    app: transaction-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: card-postgres-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: card-postgres
+  labels:
+    app: card-postgres
+spec:
+  replicas: 1
+  # One database, one volume: the old pod leaves before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: card-postgres
+  template:
+    metadata:
+      labels:
+        app: card-postgres
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: cards_db
+            - name: POSTGRES_USER
+              value: cards
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: banking-env
+                  key: CARD_DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "cards", "-d", "cards_db"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: card-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: card-postgres
+  labels:
+    app: card-postgres
+spec:
+  selector:
+    app: card-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: yanki-postgres-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yanki-postgres
+  labels:
+    app: yanki-postgres
+spec:
+  replicas: 1
+  # One database, one volume: the old pod leaves before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: yanki-postgres
+  template:
+    metadata:
+      labels:
+        app: yanki-postgres
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: yanki_db
+            - name: POSTGRES_USER
+              value: yanki
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: banking-env
+                  key: YANKI_DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "yanki", "-d", "yanki_db"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: yanki-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: yanki-postgres
+  labels:
+    app: yanki-postgres
+spec:
+  selector:
+    app: yanki-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: auth-postgres-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-postgres
+  labels:
+    app: auth-postgres
+spec:
+  replicas: 1
+  # One database, one volume: the old pod leaves before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: auth-postgres
+  template:
+    metadata:
+      labels:
+        app: auth-postgres
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: auth_db
+            - name: POSTGRES_USER
+              value: auth
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: banking-env
+                  key: AUTH_DB_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "auth", "-d", "auth_db"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: auth-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-postgres
+  labels:
+    app: auth-postgres
+spec:
+  selector:
+    app: auth-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: customer-mongo-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer-mongo
+  labels:
+    app: customer-mongo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: customer-mongo
+  template:
+    metadata:
+      labels:
+        app: customer-mongo
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: mongo
+          image: mongo:8.0
+          ports:
+            - containerPort: 27017
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              value: admin
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: banking-env
+                  key: MONGO_ROOT_PASSWORD
+            # User of the service, created by the script below the first time the volume is empty.
+            - name: CUSTOMER_DB_USERNAME
+              value: customers
+            - name: CUSTOMER_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: banking-env
+                  key: CUSTOMER_DB_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          readinessProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: customer-mongo-data
+        - name: init
+          configMap:
+            name: mongo-init
+            items:
+              - key: create-customer-user.js
+                path: create-customer-user.js
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-mongo
+  labels:
+    app: customer-mongo
+spec:
+  selector:
+    app: customer-mongo
+  ports:
+    - port: 27017
+      targetPort: 27017
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: product-mongo-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-mongo
+  labels:
+    app: product-mongo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: product-mongo
+  template:
+    metadata:
+      labels:
+        app: product-mongo
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: mongo
+          image: mongo:8.0
+          ports:
+            - containerPort: 27017
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              value: admin
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: banking-env
+                  key: MONGO_ROOT_PASSWORD
+            # User of the service, created by the script below the first time the volume is empty.
+            - name: PRODUCT_DB_USERNAME
+              value: products
+            - name: PRODUCT_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: banking-env
+                  key: PRODUCT_DB_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          readinessProbe:
+            exec:
+              command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: product-mongo-data
+        - name: init
+          configMap:
+            name: mongo-init
+            items:
+              - key: create-product-user.js
+                path: create-product-user.js
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-mongo
+  labels:
+    app: product-mongo
+spec:
+  selector:
+    app: product-mongo
+  ports:
+    - port: 27017
+      targetPort: 27017

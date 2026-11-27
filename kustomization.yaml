@@ -1,0 +1,53 @@
+# The whole banking system in Kubernetes, in the namespace "banking": Vault, the databases,
+# Kafka, Redis, the configuration and the eleven services. The other repositories are expected
+# next to this one, and the images of the services already built (see README.md).
+#
+#   kubectl kustomize .      prints every object, no cluster needed
+#   kubectl apply -k .       creates or updates them in the cluster
+#   kubectl delete -k .      removes them, volumes included
+#
+# The passwords come from the same .env file docker compose uses (copy .env.example to .env).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: banking
+
+resources:
+  - k8s/namespace.yaml
+  - k8s/vault.yaml
+  - k8s/databases.yaml
+  - k8s/kafka.yaml
+  - k8s/product-redis.yaml
+  # ConfigMap with the configuration files the Config Server serves.
+  - ../banking-config
+  - ../discovery-server/k8s
+  - ../config-server/k8s
+  - ../api-gateway/k8s
+  - ../auth-service/k8s
+  - ../customer-service/k8s
+  - ../product-service/k8s
+  - ../account-service/k8s
+  - ../credit-service/k8s
+  - ../transaction-service/k8s
+  - ../card-service/k8s
+  - ../yanki-service/k8s
+
+generatorOptions:
+  # The manifests name these objects as they are, without a content hash.
+  disableNameSuffixHash: true
+
+secretGenerator:
+  # One key per line of .env. The databases and Vault take their passwords from here; the
+  # services do not see this Secret, they read their credentials from Vault.
+  - name: banking-env
+    envs:
+      - .env
+
+configMapGenerator:
+  - name: vault-bootstrap
+    files:
+      - vault/bootstrap.sh
+  - name: mongo-init
+    files:
+      - mongo/create-customer-user.js
+      - mongo/create-product-user.js

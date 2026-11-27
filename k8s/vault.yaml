@@ -1,0 +1,108 @@
+# HashiCorp Vault in dev mode, as in infra/docker-compose.yml: in memory and unsealed, for a
+# development cluster only. At every start vault/bootstrap.sh loads the secrets of the services
+# and writes the AppRole of each one to the volume vault-approle, which the services mount read
+# only. After Vault restarts, restart the services too: their old logins stop working.
+#
+# The volume is ReadWriteOnce, enough for a cluster of one node (Docker Desktop, minikube, kind,
+# k3s). On several nodes it needs a ReadWriteMany storage class.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vault-approle
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 16Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault
+  labels:
+    app: vault
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vault
+  template:
+    metadata:
+      labels:
+        app: vault
+    spec:
+      # Without this Kubernetes adds VAULT_PORT=tcp://..., which is not a setting of Vault.
+      enableServiceLinks: false
+      containers:
+        - name: vault
+          image: hashicorp/vault:2.1.2
+          command: ["/bin/sh", "/vault/bootstrap/bootstrap.sh"]
+          ports:
+            - containerPort: 8200
+          # Every password of .env, with the name bootstrap.sh expects.
+          envFrom:
+            - secretRef:
+                name: banking-env
+          env:
+            - name: VAULT_DEV_ROOT_TOKEN_ID
+              valueFrom:
+                secretKeyRef:
+                  name: banking-env
+                  key: VAULT_ROOT_TOKEN
+            - name: CUSTOMER_DB_USERNAME
+              value: customers
+            - name: ACCOUNT_DB_USERNAME
+              value: accounts
+            - name: CREDIT_DB_USERNAME
+              value: credits
+            - name: PRODUCT_DB_USERNAME
+              value: products
+            - name: TRANSACTION_DB_USERNAME
+              value: transactions
+            - name: CARD_DB_USERNAME
+              value: cards
+            - name: YANKI_DB_USERNAME
+              value: yanki
+            - name: AUTH_DB_USERNAME
+              value: auth
+          securityContext:
+            capabilities:
+              add: [IPC_LOCK]
+          volumeMounts:
+            - name: bootstrap
+              mountPath: /vault/bootstrap
+              readOnly: true
+            - name: approle
+              mountPath: /vault/approle
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/bootstrap-done"]
+            periodSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: bootstrap
+          configMap:
+            name: vault-bootstrap
+        - name: approle
+          persistentVolumeClaim:
+            claimName: vault-approle
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  labels:
+    app: vault
+spec:
+  selector:
+    app: vault
+  ports:
+    - port: 8200
+      targetPort: 8200
