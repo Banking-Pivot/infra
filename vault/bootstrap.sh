@@ -9,7 +9,7 @@
 # every start issues new secret IDs.
 set -eu
 
-SERVICES="config-server customer-service account-service credit-service"
+SERVICES="config-server customer-service account-service credit-service product-service transaction-service card-service yanki-service auth-service"
 
 rm -f /tmp/bootstrap-done
 export VAULT_ADDR=http://127.0.0.1:8200
@@ -30,11 +30,51 @@ vault kv put secret/account-service/dev \
     spring.r2dbc.username="$ACCOUNT_DB_USERNAME" \
     spring.r2dbc.password="$ACCOUNT_DB_PASSWORD" \
     spring.flyway.user="$ACCOUNT_DB_USERNAME" \
-    spring.flyway.password="$ACCOUNT_DB_PASSWORD"
+    spring.flyway.password="$ACCOUNT_DB_PASSWORD" \
+    account.clients.auth.client-secret="$ACCOUNT_SERVICE_CLIENT_SECRET"
 
 vault kv put secret/credit-service/dev \
     spring.r2dbc.username="$CREDIT_DB_USERNAME" \
-    spring.r2dbc.password="$CREDIT_DB_PASSWORD"
+    spring.r2dbc.password="$CREDIT_DB_PASSWORD" \
+    credit.clients.auth.client-secret="$CREDIT_SERVICE_CLIENT_SECRET"
+
+# MongoDB user and the password of the Redis cache.
+vault kv put secret/product-service/dev \
+    spring.mongodb.username="$PRODUCT_DB_USERNAME" \
+    spring.mongodb.password="$PRODUCT_DB_PASSWORD" \
+    spring.data.redis.password="$PRODUCT_REDIS_PASSWORD"
+
+# Flyway connects over JDBC with its own user and password.
+vault kv put secret/transaction-service/dev \
+    spring.r2dbc.username="$TRANSACTION_DB_USERNAME" \
+    spring.r2dbc.password="$TRANSACTION_DB_PASSWORD" \
+    spring.flyway.user="$TRANSACTION_DB_USERNAME" \
+    spring.flyway.password="$TRANSACTION_DB_PASSWORD"
+
+vault kv put secret/card-service/dev \
+    spring.r2dbc.username="$CARD_DB_USERNAME" \
+    spring.r2dbc.password="$CARD_DB_PASSWORD" \
+    spring.flyway.user="$CARD_DB_USERNAME" \
+    spring.flyway.password="$CARD_DB_PASSWORD"
+
+vault kv put secret/yanki-service/dev \
+    spring.r2dbc.username="$YANKI_DB_USERNAME" \
+    spring.r2dbc.password="$YANKI_DB_PASSWORD" \
+    spring.flyway.user="$YANKI_DB_USERNAME" \
+    spring.flyway.password="$YANKI_DB_PASSWORD"
+
+# auth-service also gets the password of the first administrator, the secret that encrypts
+# its signing key at rest and the secret of every service allowed to ask for a service token.
+# account-service and credit-service find their own secret under their own path, above.
+vault kv put secret/auth-service/dev \
+    spring.r2dbc.username="$AUTH_DB_USERNAME" \
+    spring.r2dbc.password="$AUTH_DB_PASSWORD" \
+    spring.flyway.user="$AUTH_DB_USERNAME" \
+    spring.flyway.password="$AUTH_DB_PASSWORD" \
+    auth.bootstrap.admin-password="$AUTH_ADMIN_PASSWORD" \
+    auth.jwt.key-encryption-secret="$AUTH_KEY_ENCRYPTION_SECRET" \
+    auth.service-clients.account-service="$ACCOUNT_SERVICE_CLIENT_SECRET" \
+    auth.service-clients.credit-service="$CREDIT_SERVICE_CLIENT_SECRET"
 
 # Only needed by the git backend of the Config Server against a private repository.
 if [ -n "$CONFIG_GIT_TOKEN" ]; then

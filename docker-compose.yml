@@ -1,5 +1,6 @@
-# Local infrastructure of the banking microservices: one database per service and HashiCorp
-# Vault with their secrets. The services themselves run from the IDE.
+# Local infrastructure of the banking microservices: one database per service, the Redis
+# cache of product-service and HashiCorp Vault with their secrets. The services themselves
+# run from the IDE.
 #
 #   copy .env.example .env          (first time only)
 #   docker compose up -d --wait
@@ -23,6 +24,21 @@ services:
       ACCOUNT_DB_PASSWORD: ${ACCOUNT_DB_PASSWORD:?copy .env.example to .env}
       CREDIT_DB_USERNAME: credits
       CREDIT_DB_PASSWORD: ${CREDIT_DB_PASSWORD:?copy .env.example to .env}
+      PRODUCT_DB_USERNAME: products
+      PRODUCT_DB_PASSWORD: ${PRODUCT_DB_PASSWORD:?add it to .env, see .env.example}
+      PRODUCT_REDIS_PASSWORD: ${PRODUCT_REDIS_PASSWORD:?add it to .env, see .env.example}
+      TRANSACTION_DB_USERNAME: transactions
+      TRANSACTION_DB_PASSWORD: ${TRANSACTION_DB_PASSWORD:?add it to .env, see .env.example}
+      CARD_DB_USERNAME: cards
+      CARD_DB_PASSWORD: ${CARD_DB_PASSWORD:?add it to .env, see .env.example}
+      YANKI_DB_USERNAME: yanki
+      YANKI_DB_PASSWORD: ${YANKI_DB_PASSWORD:?add it to .env, see .env.example}
+      AUTH_DB_USERNAME: auth
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?add it to .env, see .env.example}
+      AUTH_ADMIN_PASSWORD: ${AUTH_ADMIN_PASSWORD:?add it to .env, see .env.example}
+      AUTH_KEY_ENCRYPTION_SECRET: ${AUTH_KEY_ENCRYPTION_SECRET:?add it to .env, see .env.example}
+      ACCOUNT_SERVICE_CLIENT_SECRET: ${ACCOUNT_SERVICE_CLIENT_SECRET:?add it to .env, see .env.example}
+      CREDIT_SERVICE_CLIENT_SECRET: ${CREDIT_SERVICE_CLIENT_SECRET:?add it to .env, see .env.example}
       CONFIG_GIT_USERNAME: ${CONFIG_GIT_USERNAME:-}
       CONFIG_GIT_TOKEN: ${CONFIG_GIT_TOKEN:-}
     ports: ["8200:8200"]
@@ -90,7 +106,156 @@ services:
       retries: 30
     restart: unless-stopped
 
+  # product-service. Root user for administration; the service logs in as "products",
+  # created by mongo/create-product-user.js the first time the volume is empty.
+  product-mongo:
+    image: mongo:8.0
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?copy .env.example to .env}
+      PRODUCT_DB_USERNAME: products
+      PRODUCT_DB_PASSWORD: ${PRODUCT_DB_PASSWORD:?add it to .env, see .env.example}
+    ports: ["27019:27017"]
+    volumes:
+      - product-mongo-data:/data/db
+      - ./mongo/create-product-user.js:/docker-entrypoint-initdb.d/create-product-user.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  # Cache of product-service. It holds copies of products that expire on their own, so it
+  # keeps nothing on disk and drops the least recently used entries when memory runs out.
+  product-redis:
+    image: redis:8.2-alpine
+    command:
+      - redis-server
+      - --requirepass
+      - ${PRODUCT_REDIS_PASSWORD:?add it to .env, see .env.example}
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 64mb
+      - --maxmemory-policy
+      - allkeys-lru
+    environment:
+      # Password redis-cli uses in the health check below.
+      REDISCLI_AUTH: ${PRODUCT_REDIS_PASSWORD:?add it to .env, see .env.example}
+    ports: ["6380:6379"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+  # transaction-service.
+  transaction-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: transactions_db
+      POSTGRES_USER: transactions
+      POSTGRES_PASSWORD: ${TRANSACTION_DB_PASSWORD:?add it to .env, see .env.example}
+    ports: ["5435:5432"]
+    volumes:
+      - transaction-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U transactions -d transactions_db"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+  # card-service: debit cards, the accounts linked to them and their payments.
+  card-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: cards_db
+      POSTGRES_USER: cards
+      POSTGRES_PASSWORD: ${CARD_DB_PASSWORD:?add it to .env, see .env.example}
+    ports: ["5436:5432"]
+    volumes:
+      - card-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U cards -d cards_db"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+  # yanki-service: mobile wallets, their balances and payments.
+  yanki-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: yanki_db
+      POSTGRES_USER: yanki
+      POSTGRES_PASSWORD: ${YANKI_DB_PASSWORD:?add it to .env, see .env.example}
+    ports: ["5437:5432"]
+    volumes:
+      - yanki-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U yanki -d yanki_db"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+  # auth-service: users, their password hashes and the key that signs the tokens.
+  auth-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: auth
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:?add it to .env, see .env.example}
+    ports: ["5438:5432"]
+    volumes:
+      - auth-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U auth -d auth_db"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    restart: unless-stopped
+
+  # Event broker between transaction-service, account-service and credit-service: one Kafka
+  # node in KRaft mode (no ZooKeeper), reached by the services at localhost:9092. Messages
+  # live for seconds and transaction-service sends again what got no answer, so it keeps
+  # nothing in a volume.
+  kafka:
+    image: apache/kafka:4.1.1
+    ports: ["9092:9092"]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+    restart: unless-stopped
+
+  # Code quality server of the course lab (Checkstyle, JaCoCo, SonarQube). The services do not
+  # need it, so it only starts when asked for:
+  #   docker compose --profile quality up -d sonarqube
+  # It answers at http://localhost:9000 after a couple of minutes (first login admin / admin).
+  sonarqube:
+    image: sonarqube:lts-community
+    profiles: ["quality"]
+    ports: ["9000:9000"]
+    volumes:
+      - sonarqube-data:/opt/sonarqube/data
+      - sonarqube-extensions:/opt/sonarqube/extensions
+    restart: unless-stopped
+
 volumes:
   customer-mongo-data:
+  product-mongo-data:
   account-postgres-data:
   credit-postgres-data:
+  transaction-postgres-data:
+  card-postgres-data:
+  yanki-postgres-data:
+  auth-postgres-data:
+  sonarqube-data:
+  sonarqube-extensions:
