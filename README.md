@@ -12,13 +12,13 @@ Este repositorio levanta la infraestructura del sistema (bases de datos, Kafka, 
 
 ## 1. Clonar los repositorios
 
-Los trece repositorios deben quedar uno al lado del otro, en la misma carpeta y con su nombre original, porque se buscan entre sí por ruta relativa.
+Los catorce repositorios deben quedar uno al lado del otro, en la misma carpeta y con su nombre original, porque se buscan entre sí por ruta relativa.
 
 ```bash
 mkdir banking && cd banking
 for repo in infra banking-config config-server discovery-server api-gateway \
             auth-service customer-service product-service account-service \
-            credit-service transaction-service card-service yanki-service; do
+            credit-service transaction-service card-service yanki-service postman; do
   git clone https://github.com/Banking-Pivot/$repo.git
 done
 ```
@@ -67,7 +67,7 @@ Los servicios tardan cerca de un minuto en quedar registrados después de que el
 
 ### Opción B: desde IntelliJ IDEA
 
-Abre la carpeta que contiene los trece repositorios. Cada servicio trae su configuración de ejecución en `.run/`, con el perfil correcto. Arráncalos en este orden:
+Abre la carpeta que contiene los repositorios. Cada servicio trae su configuración de ejecución en `.run/`, con el perfil correcto. Arráncalos en este orden:
 
 1. `discovery-server (dev)`
 2. `config-server (native)`
@@ -96,15 +96,15 @@ curl -s http://localhost:8080/api/v1/products -H "Authorization: Bearer <accessT
 
 ## 5. Probar las reglas de negocio con Postman
 
-Importa `postman/banking-business-rules.postman_collection.json`. Tiene una carpeta por dominio y, dentro, una por regla de negocio, con el caso válido, los errores y un ejemplo guardado de cada respuesta. Inicia sesión sola y crea datos nuevos en cada corrida.
+Las colecciones están en el repositorio `postman`. Importa `banking-business-rules.postman_collection.json`. Tiene una carpeta por dominio y, dentro, una por regla de negocio, con el caso válido, los errores y un ejemplo guardado de cada respuesta. Inicia sesión sola y crea datos nuevos en cada corrida.
 
 Con el Postman CLI:
 
 ```bash
-postman collection run postman/banking-business-rules.postman_collection.json
+postman collection run ../postman/banking-business-rules.postman_collection.json
 ```
 
-Cada servicio tiene además su propia colección en la carpeta `postman/` de su repositorio.
+Ese repositorio trae además, en `services/`, la colección propia de cada servicio.
 
 ### Reglas de mora
 
