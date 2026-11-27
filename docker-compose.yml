@@ -442,6 +442,9 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       CUSTOMER_API_BASE_URL: http://api-gateway:8080
       AUTH_API_BASE_URL: http://api-gateway:8080
+      # Moves the clock of credit-service forward to show overdue debt, for example
+      #   CREDIT_CLOCK_OFFSET=40d docker compose --profile apps up -d credit-service
+      CREDIT_CLOCK_OFFSET: ${CREDIT_CLOCK_OFFSET:-0s}
     ports: ["8083:8083"]
     volumes:
       - ./.secrets/credit-service.properties:/run/approle/credit-service.properties:ro
