@@ -1,6 +1,6 @@
 # Local infrastructure of the banking microservices: one database per service, the Redis
-# cache of product-service and HashiCorp Vault with their secrets. The services themselves
-# run from the IDE.
+# cache of product-service, Kafka and HashiCorp Vault with their secrets. The services
+# themselves run from the IDE, or in containers with the profile "apps" (see below).
 #
 #   copy .env.example .env          (first time only)
 #   docker compose up -d --wait
@@ -222,11 +222,24 @@ services:
     restart: unless-stopped
 
   # Event broker between transaction-service, account-service and credit-service: one Kafka
-  # node in KRaft mode (no ZooKeeper), reached by the services at localhost:9092. Messages
-  # live for seconds and transaction-service sends again what got no answer, so it keeps
-  # nothing in a volume.
+  # node in KRaft mode (no ZooKeeper). Messages live for seconds and transaction-service sends
+  # again what got no answer, so it keeps nothing in a volume. It listens twice: services on
+  # this machine (the IDE) reach it at localhost:9092, services in containers at kafka:29092.
   kafka:
     image: apache/kafka:4.1.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
     ports: ["9092:9092"]
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
@@ -247,6 +260,275 @@ services:
       - sonarqube-data:/opt/sonarqube/data
       - sonarqube-extensions:/opt/sonarqube/extensions
     restart: unless-stopped
+
+  # ---- Services in containers (profile "apps") ----
+  # Optional: the services normally run from the IDE. With this profile each one runs in its
+  # own container instead, from the image its Dockerfile builds out of the jar of
+  # "./mvnw clean verify" (the repositories are expected next to this one):
+  #
+  #   docker compose --profile apps up -d --build --wait
+  #
+  # They keep the ports they use in the IDE, so stop the ones running there first. Inside the
+  # network a service is reached by its name (http://api-gateway:8080, kafka:29092), and each
+  # one registers in Eureka with that name. Secrets still come from Vault: a container only
+  # sees the AppRole file of its own service.
+
+  discovery-server:
+    image: discovery-server:0.0.1-SNAPSHOT
+    build: ../discovery-server
+    profiles: ["apps"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      EUREKA_HOSTNAME: discovery-server
+    ports: ["8761:8761"]
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8761/actuator/health > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+    restart: unless-stopped
+
+  # Serves the banking-config folder next to this repository, like the "native" profile in
+  # the IDE, so it needs no git token and starts without Vault.
+  config-server:
+    image: config-server:0.0.1-SNAPSHOT
+    build: ../config-server
+    profiles: ["apps"]
+    environment:
+      SPRING_PROFILES_ACTIVE: native
+      CONFIG_NATIVE_LOCATIONS: file:/config/
+      SPRING_CLOUD_VAULT_ENABLED: "false"
+      EUREKA_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: config-server
+    ports: ["8888:8888"]
+    volumes:
+      - ../banking-config:/config:ro
+    mem_limit: 512m
+    depends_on:
+      discovery-server: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8888/application/default > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+    restart: unless-stopped
+
+  api-gateway:
+    image: api-gateway:0.0.1-SNAPSHOT
+    build: ../api-gateway
+    profiles: ["apps"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: api-gateway
+    ports: ["8080:8080"]
+    mem_limit: 512m
+    depends_on:
+      config-server: {condition: service_healthy}
+    restart: unless-stopped
+
+  auth-service:
+    image: auth-service:0.0.1-SNAPSHOT
+    build: ../auth-service
+    profiles: ["apps"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: auth-service
+      VAULT_URI: http://vault:8200
+      VAULT_APPROLE_FILE: /run/approle/auth-service.properties
+      AUTH_R2DBC_URL: r2dbc:postgresql://auth-postgres:5432/auth_db
+      AUTH_JDBC_URL: jdbc:postgresql://auth-postgres:5432/auth_db
+    ports: ["8088:8088"]
+    volumes:
+      - ./.secrets/auth-service.properties:/run/approle/auth-service.properties:ro
+    mem_limit: 512m
+    depends_on:
+      config-server: {condition: service_healthy}
+      vault: {condition: service_healthy}
+      auth-postgres: {condition: service_healthy}
+    restart: unless-stopped
+
+  customer-service:
+    image: customer-service:0.0.1-SNAPSHOT
+    build: ../customer-service
+    profiles: ["apps"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: customer-service
+      VAULT_URI: http://vault:8200
+      VAULT_APPROLE_FILE: /run/approle/customer-service.properties
+      CUSTOMER_MONGODB_HOST: customer-mongo
+      CUSTOMER_MONGODB_PORT: "27017"
+    ports: ["8081:8081"]
+    volumes:
+      - ./.secrets/customer-service.properties:/run/approle/customer-service.properties:ro
+    mem_limit: 512m
+    depends_on:
+      config-server: {condition: service_healthy}
+      vault: {condition: service_healthy}
+      customer-mongo: {condition: service_healthy}
+    restart: unless-stopped
+
+  product-service:
+    image: product-service:0.0.1-SNAPSHOT
+    build: ../product-service
+    profiles: ["apps"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: product-service
+      VAULT_URI: http://vault:8200
+      VAULT_APPROLE_FILE: /run/approle/product-service.properties
+      PRODUCT_MONGODB_HOST: product-mongo
+      PRODUCT_MONGODB_PORT: "27017"
+      PRODUCT_REDIS_HOST: product-redis
+      PRODUCT_REDIS_PORT: "6379"
+    ports: ["8084:8084"]
+    volumes:
+      - ./.secrets/product-service.properties:/run/approle/product-service.properties:ro
+    mem_limit: 512m
+    depends_on:
+      config-server: {condition: service_healthy}
+      vault: {condition: service_healthy}
+      product-mongo: {condition: service_healthy}
+      product-redis: {condition: service_healthy}
+    restart: unless-stopped
+
+  account-service:
+    image: account-service:0.0.1-SNAPSHOT
+    build: ../account-service
+    profiles: ["apps"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: account-service
+      VAULT_URI: http://vault:8200
+      VAULT_APPROLE_FILE: /run/approle/account-service.properties
+      ACCOUNT_R2DBC_URL: r2dbc:postgresql://account-postgres:5432/accounts_db
+      ACCOUNT_JDBC_URL: jdbc:postgresql://account-postgres:5432/accounts_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      GATEWAY_URL: http://api-gateway:8080
+    ports: ["8082:8082"]
+    volumes:
+      - ./.secrets/account-service.properties:/run/approle/account-service.properties:ro
+    mem_limit: 512m
+    depends_on:
+      config-server: {condition: service_healthy}
+      vault: {condition: service_healthy}
+      account-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    restart: unless-stopped
+
+  credit-service:
+    image: credit-service:0.0.1-SNAPSHOT
+    build: ../credit-service
+    profiles: ["apps"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: credit-service
+      VAULT_URI: http://vault:8200
+      VAULT_APPROLE_FILE: /run/approle/credit-service.properties
+      CREDIT_R2DBC_URL: r2dbc:postgresql://credit-postgres:5432/credits_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      CUSTOMER_API_BASE_URL: http://api-gateway:8080
+      AUTH_API_BASE_URL: http://api-gateway:8080
+    ports: ["8083:8083"]
+    volumes:
+      - ./.secrets/credit-service.properties:/run/approle/credit-service.properties:ro
+    mem_limit: 512m
+    depends_on:
+      config-server: {condition: service_healthy}
+      vault: {condition: service_healthy}
+      credit-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    restart: unless-stopped
+
+  transaction-service:
+    image: transaction-service:0.0.1-SNAPSHOT
+    build: ../transaction-service
+    profiles: ["apps"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: transaction-service
+      VAULT_URI: http://vault:8200
+      VAULT_APPROLE_FILE: /run/approle/transaction-service.properties
+      TRANSACTION_R2DBC_URL: r2dbc:postgresql://transaction-postgres:5432/transactions_db
+      TRANSACTION_JDBC_URL: jdbc:postgresql://transaction-postgres:5432/transactions_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports: ["8085:8085"]
+    volumes:
+      - ./.secrets/transaction-service.properties:/run/approle/transaction-service.properties:ro
+    mem_limit: 512m
+    depends_on:
+      config-server: {condition: service_healthy}
+      vault: {condition: service_healthy}
+      transaction-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    restart: unless-stopped
+
+  card-service:
+    image: card-service:0.0.1-SNAPSHOT
+    build: ../card-service
+    profiles: ["apps"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: card-service
+      VAULT_URI: http://vault:8200
+      VAULT_APPROLE_FILE: /run/approle/card-service.properties
+      CARD_R2DBC_URL: r2dbc:postgresql://card-postgres:5432/cards_db
+      CARD_JDBC_URL: jdbc:postgresql://card-postgres:5432/cards_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports: ["8086:8086"]
+    volumes:
+      - ./.secrets/card-service.properties:/run/approle/card-service.properties:ro
+    mem_limit: 512m
+    depends_on:
+      config-server: {condition: service_healthy}
+      vault: {condition: service_healthy}
+      card-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    restart: unless-stopped
+
+  yanki-service:
+    image: yanki-service:0.0.1-SNAPSHOT
+    build: ../yanki-service
+    profiles: ["apps"]
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      CONFIG_SERVER_URL: http://config-server:8888
+      EUREKA_URL: http://discovery-server:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: yanki-service
+      VAULT_URI: http://vault:8200
+      VAULT_APPROLE_FILE: /run/approle/yanki-service.properties
+      YANKI_R2DBC_URL: r2dbc:postgresql://yanki-postgres:5432/yanki_db
+      YANKI_JDBC_URL: jdbc:postgresql://yanki-postgres:5432/yanki_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports: ["8087:8087"]
+    volumes:
+      - ./.secrets/yanki-service.properties:/run/approle/yanki-service.properties:ro
+    mem_limit: 512m
+    depends_on:
+      config-server: {condition: service_healthy}
+      vault: {condition: service_healthy}
+      yanki-postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    restart: unless-stopped
+
+  # ---- End of the services in containers ----
 
 volumes:
   customer-mongo-data:
