@@ -248,7 +248,7 @@ services:
       retries: 20
     restart: unless-stopped
 
-  # Code quality server of the course lab (Checkstyle, JaCoCo, SonarQube). The services do not
+  # Code quality server (Checkstyle, JaCoCo, SonarQube). The services do not
   # need it, so it only starts when asked for:
   #   docker compose --profile quality up -d sonarqube
   # It answers at http://localhost:9000 after a couple of minutes (first login admin / admin).
